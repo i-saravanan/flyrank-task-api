@@ -3,7 +3,26 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, field_validator
 
-app = FastAPI(title="Task API", version="1.0")
+app = FastAPI(
+    title="Task API",
+    version="1.0",
+    description=(
+        "A simple **CRUD API** for managing tasks, built with FastAPI.\n\n"
+        "## Features\n"
+        "- List, create, update, and delete tasks\n"
+        "- In-memory storage (resets on server restart)\n"
+        "- Full input validation with clear error messages\n\n"
+        "## Storage\n"
+        "> **Note:** All data is stored in memory. No database is used. "
+        "Data is lost when the server restarts."
+    ),
+    contact={"name": "Saravanan I", "email": "saravanan05082004@gmail.com"},
+    license_info={"name": "MIT"},
+    openapi_tags=[
+        {"name": "meta", "description": "API metadata and health checks"},
+        {"name": "tasks", "description": "CRUD operations for tasks"},
+    ],
+)
 
 
 @app.exception_handler(RequestValidationError)
@@ -66,7 +85,7 @@ def find_task(task_id: int) -> dict | None:
 # Root & Health
 # ---------------------------------------------------------------------------
 
-@app.get("/", summary="API information")
+@app.get("/", summary="API information", tags=["meta"])
 def root():
     """Return basic API metadata and available endpoints."""
     return {
@@ -76,7 +95,7 @@ def root():
     }
 
 
-@app.get("/health", summary="Health check")
+@app.get("/health", summary="Health check", tags=["meta"])
 def health():
     """Return a simple health status to confirm the server is running."""
     return {"status": "ok"}
@@ -86,13 +105,13 @@ def health():
 # Stage 2 — Read  /  Stage 3 — Create  /  Stage 4 — Update & Delete
 # ---------------------------------------------------------------------------
 
-@app.get("/tasks", summary="List all tasks")
+@app.get("/tasks", summary="List all tasks", tags=["tasks"])
 def list_tasks():
     """Return all tasks stored in memory."""
     return tasks
 
 
-@app.get("/tasks/{task_id}", summary="Get a single task")
+@app.get("/tasks/{task_id}", summary="Get a single task", tags=["tasks"])
 def get_task(task_id: int):
     """Return the task with the given ID.
 
@@ -104,7 +123,7 @@ def get_task(task_id: int):
     return task
 
 
-@app.post("/tasks", status_code=201, summary="Create a new task")
+@app.post("/tasks", status_code=201, summary="Create a new task", tags=["tasks"])
 def create_task(body: TaskCreate):
     """Create a task with the given title.
 
@@ -119,7 +138,7 @@ def create_task(body: TaskCreate):
     return new_task
 
 
-@app.put("/tasks/{task_id}", summary="Update a task")
+@app.put("/tasks/{task_id}", summary="Update a task", tags=["tasks"])
 def update_task(task_id: int, body: TaskUpdate):
     """Update a task's title and/or done status.
 
@@ -139,7 +158,7 @@ def update_task(task_id: int, body: TaskUpdate):
     return task
 
 
-@app.delete("/tasks/{task_id}", status_code=204, summary="Delete a task")
+@app.delete("/tasks/{task_id}", status_code=204, summary="Delete a task", tags=["tasks"])
 def delete_task(task_id: int):
     """Delete a task by ID.
 
