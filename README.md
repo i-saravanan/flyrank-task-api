@@ -56,8 +56,7 @@ You can use **"Try it out"** on every endpoint to run a full CRUD cycle directly
 
 ### Swagger UI Screenshot
 
-> _Open http://127.0.0.1:8000/docs and add a screenshot here._
-
+![Swagger UI](docs/swagger-ui.png)
 ---
 
 ## 🗺️ Endpoint Table
