@@ -41,6 +41,19 @@ class TaskCreate(BaseModel):
         return v.strip()
 
 
+class TaskUpdate(BaseModel):
+    """Request body for updating an existing task (all fields optional)."""
+    title: str | None = None
+    done: bool | None = None
+
+    @field_validator("title")
+    @classmethod
+    def title_must_not_be_empty(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            raise ValueError("title must not be empty")
+        return v.strip() if v is not None else v
+
+
 def find_task(task_id: int) -> dict | None:
     """Return the task dict with the given id, or None."""
     for task in tasks:
@@ -70,7 +83,7 @@ def health():
 
 
 # ---------------------------------------------------------------------------
-# Stage 2 — Read  /  Stage 3 — Create
+# Stage 2 — Read  /  Stage 3 — Create  /  Stage 4 — Update & Delete
 # ---------------------------------------------------------------------------
 
 @app.get("/tasks", summary="List all tasks")
@@ -104,3 +117,37 @@ def create_task(body: TaskCreate):
     tasks.append(new_task)
     next_id += 1
     return new_task
+
+
+@app.put("/tasks/{task_id}", summary="Update a task")
+def update_task(task_id: int, body: TaskUpdate):
+    """Update a task's title and/or done status.
+
+    - At least one field (`title` or `done`) should be provided.
+    - **400** if the body is empty or title is blank.
+    - **404** if the task does not exist.
+    """
+    task = find_task(task_id)
+    if task is None:
+        return JSONResponse(status_code=404, content={"error": f"Task {task_id} not found"})
+    if body.title is None and body.done is None:
+        return JSONResponse(status_code=400, content={"error": "Request body must include at least one field: title or done"})
+    if body.title is not None:
+        task["title"] = body.title
+    if body.done is not None:
+        task["done"] = body.done
+    return task
+
+
+@app.delete("/tasks/{task_id}", status_code=204, summary="Delete a task")
+def delete_task(task_id: int):
+    """Delete a task by ID.
+
+    - Returns **204** with an empty body on success.
+    - **404** if the task does not exist.
+    """
+    task = find_task(task_id)
+    if task is None:
+        return JSONResponse(status_code=404, content={"error": f"Task {task_id} not found"})
+    tasks.remove(task)
+    return None
