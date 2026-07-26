@@ -1,7 +1,18 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel, field_validator
 
 app = FastAPI(title="Task API", version="1.0")
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Return HTTP 400 with a JSON error body for request validation failures."""
+    errors = exc.errors()
+    msg = errors[0]["msg"] if errors else "Invalid request body"
+    return JSONResponse(status_code=400, content={"error": msg})
+
 
 # ---------------------------------------------------------------------------
 # In-memory storage — the ONLY persistence layer for this project
@@ -12,6 +23,22 @@ tasks: list[dict] = [
     {"id": 3, "title": "Write unit tests", "done": False},
 ]
 next_id: int = 4  # auto-increment counter
+
+
+# ---------------------------------------------------------------------------
+# Pydantic schemas
+# ---------------------------------------------------------------------------
+
+class TaskCreate(BaseModel):
+    """Request body for creating a new task."""
+    title: str
+
+    @field_validator("title")
+    @classmethod
+    def title_must_not_be_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("title must not be empty")
+        return v.strip()
 
 
 def find_task(task_id: int) -> dict | None:
@@ -43,7 +70,7 @@ def health():
 
 
 # ---------------------------------------------------------------------------
-# Stage 2 — Read
+# Stage 2 — Read  /  Stage 3 — Create
 # ---------------------------------------------------------------------------
 
 @app.get("/tasks", summary="List all tasks")
@@ -62,3 +89,18 @@ def get_task(task_id: int):
     if task is None:
         return JSONResponse(status_code=404, content={"error": f"Task {task_id} not found"})
     return task
+
+
+@app.post("/tasks", status_code=201, summary="Create a new task")
+def create_task(body: TaskCreate):
+    """Create a task with the given title.
+
+    - **title** is required and must not be empty (returns **400** otherwise).
+    - The new task is assigned the next available ID with `done=false`.
+    - Returns **201** with the created task.
+    """
+    global next_id
+    new_task = {"id": next_id, "title": body.title, "done": False}
+    tasks.append(new_task)
+    next_id += 1
+    return new_task
