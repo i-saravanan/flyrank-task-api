@@ -1,7 +1,9 @@
 # Task API
 
 A simple, production-style **CRUD REST API** for managing tasks, built with **Python 3.10+** and **FastAPI**.  
-Built as the FlyRank Week 2 assignment — "Build your first CRUD API".
+Data is stored in a **SQLite** database (`tasks.db`) using Python's built-in `sqlite3` module.
+
+Built as the FlyRank Week 2 & 3 assignment.
 
 ---
 
@@ -13,13 +15,15 @@ Built as the FlyRank Week 2 assignment — "Build your first CRUD API".
 | FastAPI | 0.111.0 |
 | Uvicorn | 0.30.1 |
 
+> No additional database drivers needed — `sqlite3` is part of Python's standard library.
+
 ---
 
 ## ⚙️ Installation
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/saravanan05082004/flyrank-task-api.git
+git clone https://github.com/i-saravanan/flyrank-task-api.git
 cd flyrank-task-api
 
 # 2. (Optional) Create a virtual environment
@@ -41,6 +45,66 @@ python -m uvicorn main:app --host 127.0.0.1 --port 8000
 
 The server starts at **http://127.0.0.1:8000**
 
+On first run, the server automatically:
+1. Creates `tasks.db` in the project directory
+2. Creates the `tasks` table (if it doesn't exist)
+3. Seeds 3 example tasks (only if the table is empty)
+
+> **Deleting `tasks.db` and restarting** recreates everything automatically from scratch.
+
+---
+
+## 💾 Storage — Why SQLite?
+
+| Feature | Detail |
+|---------|--------|
+| **Engine** | SQLite via Python's built-in `sqlite3` module |
+| **File location** | `tasks.db` in the project root directory |
+| **Persistence** | Data survives server restarts |
+| **No setup needed** | No database server, no installation, no config |
+| **Standard library** | Zero extra dependencies |
+
+SQLite was chosen because:
+- It requires **no external server or setup**
+- It is **built into Python** (no pip install)
+- It is **file-based** — `tasks.db` is portable and easy to inspect
+- It is **persistent** — data survives server restarts (unlike the previous in-memory list)
+- It is industry-standard for embedded/lightweight applications
+
+---
+
+## 🗄️ Database Schema
+
+```sql
+CREATE TABLE tasks (
+    id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT    NOT NULL,
+    done  INTEGER NOT NULL DEFAULT 0
+);
+```
+
+- `done` is stored as `0` (false) or `1` (true) — converted to JSON boolean automatically
+- All queries use **parameterized SQL** (`?` placeholders) to prevent SQL injection
+
+### Example SQL queries
+
+```sql
+-- List all tasks
+SELECT * FROM tasks;
+
+-- Filter completed tasks
+SELECT * FROM tasks WHERE done = 1;
+
+-- Count all tasks
+SELECT COUNT(*) FROM tasks;
+
+-- Mark all tasks done
+UPDATE tasks SET done = 1;
+
+-- Delete all completed tasks
+DELETE FROM tasks WHERE done = 1;
+```
+
 ---
 
 ## 📚 Swagger UI
@@ -57,6 +121,15 @@ You can use **"Try it out"** on every endpoint to run a full CRUD cycle directly
 ### Swagger UI Screenshot
 
 ![Swagger UI](docs/swagger-ui.png)
+
+---
+
+## 🗄️ DB Browser for SQLite Screenshot
+
+The `tasks.db` file can be opened and explored with [DB Browser for SQLite](https://sqlitebrowser.org/).
+
+![DB Browser for SQLite](docs/db-browser.png)
+
 ---
 
 ## 🗺️ Endpoint Table
@@ -85,7 +158,7 @@ You can use **"Try it out"** on every endpoint to run a full CRUD cycle directly
 
 All errors are returned as **JSON**:
 ```json
-{ "error": "Task 99 not found" }
+{ "error": "Task not found" }
 ```
 
 ---
@@ -116,15 +189,6 @@ curl -X POST http://127.0.0.1:8000/tasks \
 {"id": 4, "title": "Buy milk", "done": false}
 ```
 
-### Get a task
-```bash
-curl http://127.0.0.1:8000/tasks/1
-```
-**Response (200):**
-```json
-{"id": 1, "title": "Buy groceries", "done": false}
-```
-
 ### Update a task
 ```bash
 curl -X PUT http://127.0.0.1:8000/tasks/1 \
@@ -144,31 +208,12 @@ curl -X DELETE http://127.0.0.1:8000/tasks/1
 
 ### Unknown ID → 404
 ```bash
-curl http://127.0.0.1:8000/tasks/99
+curl http://127.0.0.1:8000/tasks/999
 ```
 **Response (404):**
 ```json
-{"error": "Task 99 not found"}
+{"error": "Task not found"}
 ```
-
-### Invalid body → 400
-```bash
-curl -X POST http://127.0.0.1:8000/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"title": ""}'
-```
-**Response (400):**
-```json
-{"error": "Value error, title must not be empty"}
-```
-
----
-
-## 💾 Storage
-
-> **In-memory only.** No database, no files, no external services.  
-> All task data is stored in a Python list. Data is reset every time the server restarts.  
-> This is intentional — the goal of this assignment is to practise API design, not persistence.
 
 ---
 
@@ -176,8 +221,12 @@ curl -X POST http://127.0.0.1:8000/tasks \
 
 ```
 flyrank-task-api/
-├── main.py           # FastAPI application (all routes + models)
+├── main.py           # FastAPI application (all routes + SQLite storage)
 ├── requirements.txt  # Python dependencies
+├── tasks.db          # SQLite database (auto-created, git-ignored)
+├── docs/
+│   ├── swagger-ui.png   # Swagger UI screenshot
+│   └── db-browser.png   # DB Browser for SQLite screenshot
 └── README.md         # This file
 ```
 
@@ -186,4 +235,4 @@ flyrank-task-api/
 ## 👤 Author
 
 **Saravanan I** — saravanan05082004@gmail.com  
-FlyRank Week 2 Assignment
+FlyRank Week 2 & 3 Assignment
