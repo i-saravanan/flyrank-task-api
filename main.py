@@ -165,14 +165,16 @@ def health():
 
 
 # ---------------------------------------------------------------------------
-# Stage 1 — Read from SQLite  (GET /tasks, GET /tasks/{id})
+# Stage 2 — Read from Postgres  (GET /tasks, GET /tasks/{id})
 # ---------------------------------------------------------------------------
 
 @app.get("/tasks", summary="List all tasks", tags=["tasks"])
 def list_tasks():
     """Return all tasks stored in the database."""
     with db() as conn:
-        rows = conn.execute("SELECT id, title, done FROM tasks ORDER BY id").fetchall()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT id, title, done FROM tasks ORDER BY id")
+            rows = cur.fetchall()
     return [row_to_dict(r) for r in rows]
 
 
@@ -183,12 +185,15 @@ def get_task(task_id: int):
     - **404** with `{"error": "Task not found"}` if the task does not exist.
     """
     with db() as conn:
-        row = conn.execute(
-            "SELECT id, title, done FROM tasks WHERE id = ?", (task_id,)
-        ).fetchone()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT id, title, done FROM tasks WHERE id = %s", (task_id,)
+            )
+            row = cur.fetchone()
     if row is None:
         return JSONResponse(status_code=404, content={"error": "Task not found"})
     return row_to_dict(row)
+
 
 
 # ---------------------------------------------------------------------------
