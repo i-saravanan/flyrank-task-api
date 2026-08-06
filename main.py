@@ -197,7 +197,7 @@ def get_task(task_id: int):
 
 
 # ---------------------------------------------------------------------------
-# Stage 2 — Insert into SQLite  (POST /tasks)
+# Stage 3 — Full CRUD on Postgres  (POST, PUT, DELETE)
 # ---------------------------------------------------------------------------
 
 @app.post("/tasks", status_code=201, summary="Create a new task", tags=["tasks"])
@@ -209,16 +209,14 @@ def create_task(body: TaskCreate):
     - Returns **201** with the created task.
     """
     with db() as conn:
-        cursor = conn.execute(
-            "INSERT INTO tasks (title, done) VALUES (?, ?)", (body.title, 0)
-        )
-        new_id = cursor.lastrowid
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO tasks (title, done) VALUES (%s, %s) RETURNING id",
+                (body.title, False)
+            )
+            new_id = cur.fetchone()[0]
     return {"id": new_id, "title": body.title, "done": False}
 
-
-# ---------------------------------------------------------------------------
-# Stage 3 — Update and Delete with SQL
-# ---------------------------------------------------------------------------
 
 @app.put("/tasks/{task_id}", summary="Update a task", tags=["tasks"])
 def update_task(task_id: int, body: TaskUpdate):
@@ -228,24 +226,25 @@ def update_task(task_id: int, body: TaskUpdate):
     - **400** if the body is empty or title is blank.
     - **404** if the task does not exist.
     """
-    # Verify task exists first
     with db() as conn:
-        row = conn.execute(
-            "SELECT id, title, done FROM tasks WHERE id = ?", (task_id,)
-        ).fetchone()
-        if row is None:
-            return JSONResponse(status_code=404, content={"error": "Task not found"})
-        if body.title is None and body.done is None:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "Request body must include at least one field: title or done"},
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT id, title, done FROM tasks WHERE id = %s", (task_id,)
             )
-        new_title = body.title if body.title is not None else row["title"]
-        new_done = int(body.done) if body.done is not None else row["done"]
-        conn.execute(
-            "UPDATE tasks SET title = ?, done = ? WHERE id = ?",
-            (new_title, new_done, task_id),
-        )
+            row = cur.fetchone()
+            if row is None:
+                return JSONResponse(status_code=404, content={"error": "Task not found"})
+            if body.title is None and body.done is None:
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "Request body must include at least one field: title or done"},
+                )
+            new_title = body.title if body.title is not None else row["title"]
+            new_done = body.done if body.done is not None else row["done"]
+            cur.execute(
+                "UPDATE tasks SET title = %s, done = %s WHERE id = %s",
+                (new_title, new_done, task_id),
+            )
     return {"id": task_id, "title": new_title, "done": bool(new_done)}
 
 
@@ -257,10 +256,13 @@ def delete_task(task_id: int):
     - **404** if the task does not exist.
     """
     with db() as conn:
-        row = conn.execute(
-            "SELECT id FROM tasks WHERE id = ?", (task_id,)
-        ).fetchone()
-        if row is None:
-            return JSONResponse(status_code=404, content={"error": "Task not found"})
-        conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM tasks WHERE id = %s", (task_id,)
+            )
+            row = cur.fetchone()
+            if row is None:
+                return JSONResponse(status_code=404, content={"error": "Task not found"})
+            cur.execute("DELETE FROM tasks WHERE id = %s", (task_id,))
     return None
+
