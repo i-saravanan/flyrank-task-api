@@ -1,134 +1,133 @@
-# Task API
+# Task API (Containerized)
 
-A simple, production-style **CRUD REST API** for managing tasks, built with **Python 3.10+** and **FastAPI**.  
-Data is stored in a **SQLite** database (`tasks.db`) using Python's built-in `sqlite3` module.
-
-Built as the FlyRank Week 2 & 3 assignment.
+A simple, production-style **CRUD REST API** for managing tasks, built with **Python 3.10+** and **FastAPI**.
+In this version, the storage layer has been upgraded from SQLite to **PostgreSQL** running in a Docker container, containerized and orchestrated with **Docker Compose**.
 
 ---
 
-## 📋 Requirements
+## 🏗️ Architecture
 
-| Requirement | Version |
-|-------------|---------|
-| Python | 3.10 or higher |
-| FastAPI | 0.111.0 |
-| Uvicorn | 0.30.1 |
-
-> No additional database drivers needed — `sqlite3` is part of Python's standard library.
-
----
-
-## ⚙️ Installation
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/i-saravanan/flyrank-task-api.git
-cd flyrank-task-api
-
-# 2. (Optional) Create a virtual environment
-python -m venv venv
-venv\Scripts\activate      # Windows
-# source venv/bin/activate  # macOS / Linux
-
-# 3. Install dependencies
-pip install -r requirements.txt
+```
+[ Client (cURL / Browser) ]
+            │
+            ▼ (Port 8000)
+┌─────────────────────────────────┐
+│     FastAPI Application         │  <--- Running in Docker (tasks_web)
+│  (main.py / uvicorn / psycopg2) │
+└─────────────────────────────────┘
+            │
+            ▼ (Port 5432)
+┌─────────────────────────────────┐
+│      PostgreSQL Database        │  <--- Running in Docker (tasks_db)
+│       (postgres:15-alpine)      │
+└─────────────────────────────────┘
+            │
+            ▼ (Volume Mount)
+┌─────────────────────────────────┐
+│      Docker Persistent Volume   │  <--- Survives container restarts
+│             (pg_data)           │
+└─────────────────────────────────┘
 ```
 
 ---
 
-## 🚀 Start the Server
+## 💾 Storage — Why PostgreSQL replaced SQLite?
 
+| SQLite (Previous) | PostgreSQL (Current) |
+|---|---|
+| Light, serverless database storing data in a local file (`tasks.db`). | Multi-user, production-ready relational database management system. |
+| Limited concurrent write throughput. | High concurrency support, ideal for production workloads. |
+| Embedded inside the host machine. | Isolated inside a separate Docker container, making the app stack independent. |
+| Handled as plain integer flags (0/1) for booleans. | Native boolean fields (`TRUE`/`FALSE`) which match JSON specs. |
+
+> **Note:** Only the repository storage layer was modified to use PostgreSQL with parameterized queries. The FastAPI endpoints, request schemas, response formats, status codes, and service layer validation logic remain **entirely unchanged**.
+
+---
+
+## ⚙️ Prerequisites
+
+- **Docker** and **Docker Compose** installed on your system.
+- (Optional for local development) **Python 3.10+**
+
+---
+
+## 🚀 One-Command Launch (Docker Compose)
+
+The entire stack (FastAPI app + PostgreSQL database + persistent volume) can be launched with a single command.
+
+### 1. Configure the Environment
+Copy the example environment variables to create a `.env` file:
 ```bash
-python -m uvicorn main:app --host 127.0.0.1 --port 8000
+cp .env.example .env
+```
+*(Windows PowerShell)*:
+```powershell
+Copy-Item .env.example .env
+```
+
+### 2. Start the Stack
+Run the following command to build the FastAPI image and start both services:
+```bash
+docker compose up -d --build
 ```
 
 The server starts at **http://127.0.0.1:8000**
 
-On first run, the server automatically:
-1. Creates `tasks.db` in the project directory
-2. Creates the `tasks` table (if it doesn't exist)
-3. Seeds 3 example tasks (only if the table is empty)
-
-> **Deleting `tasks.db` and restarting** recreates everything automatically from scratch.
+On startup, the system automatically:
+1. Waits for PostgreSQL to become healthy.
+2. Connects to PostgreSQL and executes `schema.sql` to create the `tasks` table if it is missing.
+3. Seeds exactly three example tasks if the table is empty.
 
 ---
 
-## 💾 Storage — Why SQLite?
+## 💾 Persistence Verification
 
-| Feature | Detail |
-|---------|--------|
-| **Engine** | SQLite via Python's built-in `sqlite3` module |
-| **File location** | `tasks.db` in the project root directory |
-| **Persistence** | Data survives server restarts |
-| **No setup needed** | No database server, no installation, no config |
-| **Standard library** | Zero extra dependencies |
+The PostgreSQL database uses a persistent Docker volume (`pg_data`) mapped to `/var/lib/postgresql/data`. To verify that the tasks survive container restarts:
 
-SQLite was chosen because:
-- It requires **no external server or setup**
-- It is **built into Python** (no pip install)
-- It is **file-based** — `tasks.db` is portable and easy to inspect
-- It is **persistent** — data survives server restarts (unlike the previous in-memory list)
-- It is industry-standard for embedded/lightweight applications
+1. **Create a task**:
+   ```bash
+   curl -X POST http://127.0.0.1:8000/tasks -H "Content-Type: application/json" -d '{"title": "Verify Docker Volume"}'
+   ```
+2. **Restart the stack**:
+   ```bash
+   docker compose restart
+   ```
+3. **Verify it persists**:
+   ```bash
+   curl http://127.0.0.1:8000/tasks
+   ```
+   *The list will still include the "Verify Docker Volume" task.*
 
 ---
 
 ## 🗄️ Database Schema
 
+`schema.sql` creates the schema automatically:
 ```sql
-CREATE TABLE tasks (
-    id    INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT    NOT NULL,
-    done  INTEGER NOT NULL DEFAULT 0
+CREATE TABLE IF NOT EXISTS tasks (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    done BOOLEAN NOT NULL DEFAULT FALSE
 );
-```
-
-- `done` is stored as `0` (false) or `1` (true) — converted to JSON boolean automatically
-- All queries use **parameterized SQL** (`?` placeholders) to prevent SQL injection
-
-### Example SQL queries
-
-```sql
--- List all tasks
-SELECT * FROM tasks;
-
--- Filter completed tasks
-SELECT * FROM tasks WHERE done = 1;
-
--- Count all tasks
-SELECT COUNT(*) FROM tasks;
-
--- Mark all tasks done
-UPDATE tasks SET done = 1;
-
--- Delete all completed tasks
-DELETE FROM tasks WHERE done = 1;
 ```
 
 ---
 
-## 📚 Swagger UI
+## 📚 Interactive Documentation (Swagger UI)
 
-FastAPI generates interactive API docs automatically.  
-Open your browser and navigate to:
-
+Navigate to:
 ```
 http://127.0.0.1:8000/docs
 ```
-
 You can use **"Try it out"** on every endpoint to run a full CRUD cycle directly from the browser.
+
+### Docker Desktop Running Stack
+
+![Docker Desktop](docs/docker.png)
 
 ### Swagger UI Screenshot
 
 ![Swagger UI](docs/swagger-ui.png)
-
----
-
-## 🗄️ DB Browser for SQLite Screenshot
-
-The `tasks.db` file can be opened and explored with [DB Browser for SQLite](https://sqlitebrowser.org/).
-
-![DB Browser for SQLite](docs/db-browser.png)
 
 ---
 
@@ -163,76 +162,7 @@ All errors are returned as **JSON**:
 
 ---
 
-## 🧪 Example curl Commands
-
-### List all tasks
-```bash
-curl http://127.0.0.1:8000/tasks
-```
-**Response (200):**
-```json
-[
-  {"id": 1, "title": "Buy groceries", "done": false},
-  {"id": 2, "title": "Read FastAPI docs", "done": true},
-  {"id": 3, "title": "Write unit tests", "done": false}
-]
-```
-
-### Create a task
-```bash
-curl -X POST http://127.0.0.1:8000/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Buy milk"}'
-```
-**Response (201):**
-```json
-{"id": 4, "title": "Buy milk", "done": false}
-```
-
-### Update a task
-```bash
-curl -X PUT http://127.0.0.1:8000/tasks/1 \
-  -H "Content-Type: application/json" \
-  -d '{"done": true}'
-```
-**Response (200):**
-```json
-{"id": 1, "title": "Buy groceries", "done": true}
-```
-
-### Delete a task
-```bash
-curl -X DELETE http://127.0.0.1:8000/tasks/1
-```
-**Response: 204 No Content (empty body)**
-
-### Unknown ID → 404
-```bash
-curl http://127.0.0.1:8000/tasks/999
-```
-**Response (404):**
-```json
-{"error": "Task not found"}
-```
-
----
-
-## 📁 Project Structure
-
-```
-flyrank-task-api/
-├── main.py           # FastAPI application (all routes + SQLite storage)
-├── requirements.txt  # Python dependencies
-├── tasks.db          # SQLite database (auto-created, git-ignored)
-├── docs/
-│   ├── swagger-ui.png   # Swagger UI screenshot
-│   └── db-browser.png   # DB Browser for SQLite screenshot
-└── README.md         # This file
-```
-
----
-
 ## 👤 Author
 
 **Saravanan I** — saravanan05082004@gmail.com  
-FlyRank Week 2 & 3 Assignment
+FlyRank Week 4 Assignment (BE-04)
