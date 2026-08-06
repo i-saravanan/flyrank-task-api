@@ -1,7 +1,72 @@
+import sqlite3
+from contextlib import contextmanager
+from pathlib import Path
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, field_validator
+
+# ---------------------------------------------------------------------------
+# Database setup
+# ---------------------------------------------------------------------------
+
+DB_PATH = Path(__file__).parent / "tasks.db"
+
+
+def get_connection() -> sqlite3.Connection:
+    """Open a connection with row_factory so rows behave like dicts."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+@contextmanager
+def db():
+    """Yield a connection and auto-commit/rollback/close."""
+    conn = get_connection()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def init_db() -> None:
+    """Create table and seed exactly three rows if the table is empty."""
+    with db() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tasks (
+                id    INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT    NOT NULL,
+                done  INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        row = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()
+        if row[0] == 0:
+            conn.executemany(
+                "INSERT INTO tasks (title, done) VALUES (?, ?)",
+                [
+                    ("Buy groceries", 0),
+                    ("Read FastAPI docs", 1),
+                    ("Write unit tests", 0),
+                ],
+            )
+
+
+def row_to_dict(row: sqlite3.Row) -> dict:
+    """Convert a sqlite3.Row to a plain dict with done as bool."""
+    return {"id": row["id"], "title": row["title"], "done": bool(row["done"])}
+
+
+# ---------------------------------------------------------------------------
+# FastAPI app
+# ---------------------------------------------------------------------------
 
 app = FastAPI(
     title="Task API",
@@ -10,11 +75,12 @@ app = FastAPI(
         "A simple **CRUD API** for managing tasks, built with FastAPI.\n\n"
         "## Features\n"
         "- List, create, update, and delete tasks\n"
-        "- In-memory storage (resets on server restart)\n"
+        "- Persistent SQLite storage (`tasks.db`)\n"
         "- Full input validation with clear error messages\n\n"
         "## Storage\n"
-        "> **Note:** All data is stored in memory. No database is used. "
-        "Data is lost when the server restarts."
+        "> **Note:** Data is stored in `tasks.db` (SQLite). "
+        "The database and table are created automatically on first run. "
+        "Deleting `tasks.db` and restarting the server recreates everything."
     ),
     contact={"name": "Saravanan I", "email": "saravanan05082004@gmail.com"},
     license_info={"name": "MIT"},
@@ -24,6 +90,13 @@ app = FastAPI(
     ],
 )
 
+# Initialise database on startup
+init_db()
+
+
+# ---------------------------------------------------------------------------
+# Validation error → 400
+# ---------------------------------------------------------------------------
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -31,17 +104,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     errors = exc.errors()
     msg = errors[0]["msg"] if errors else "Invalid request body"
     return JSONResponse(status_code=400, content={"error": msg})
-
-
-# ---------------------------------------------------------------------------
-# In-memory storage — the ONLY persistence layer for this project
-# ---------------------------------------------------------------------------
-tasks: list[dict] = [
-    {"id": 1, "title": "Buy groceries", "done": False},
-    {"id": 2, "title": "Read FastAPI docs", "done": True},
-    {"id": 3, "title": "Write unit tests", "done": False},
-]
-next_id: int = 4  # auto-increment counter
 
 
 # ---------------------------------------------------------------------------
@@ -73,16 +135,8 @@ class TaskUpdate(BaseModel):
         return v.strip() if v is not None else v
 
 
-def find_task(task_id: int) -> dict | None:
-    """Return the task dict with the given id, or None."""
-    for task in tasks:
-        if task["id"] == task_id:
-            return task
-    return None
-
-
 # ---------------------------------------------------------------------------
-# Root & Health
+# Root & Health  (unchanged)
 # ---------------------------------------------------------------------------
 
 @app.get("/", summary="API information", tags=["meta"])
@@ -102,26 +156,35 @@ def health():
 
 
 # ---------------------------------------------------------------------------
-# Stage 2 — Read  /  Stage 3 — Create  /  Stage 4 — Update & Delete
+# Stage 1 — Read from SQLite
 # ---------------------------------------------------------------------------
 
 @app.get("/tasks", summary="List all tasks", tags=["tasks"])
 def list_tasks():
-    """Return all tasks stored in memory."""
-    return tasks
+    """Return all tasks stored in the database."""
+    with db() as conn:
+        rows = conn.execute("SELECT id, title, done FROM tasks ORDER BY id").fetchall()
+    return [row_to_dict(r) for r in rows]
 
 
 @app.get("/tasks/{task_id}", summary="Get a single task", tags=["tasks"])
 def get_task(task_id: int):
     """Return the task with the given ID.
 
-    - **404** with `{"error": "Task <id> not found"}` if the task does not exist.
+    - **404** with `{"error": "Task not found"}` if the task does not exist.
     """
-    task = find_task(task_id)
-    if task is None:
-        return JSONResponse(status_code=404, content={"error": f"Task {task_id} not found"})
-    return task
+    with db() as conn:
+        row = conn.execute(
+            "SELECT id, title, done FROM tasks WHERE id = ?", (task_id,)
+        ).fetchone()
+    if row is None:
+        return JSONResponse(status_code=404, content={"error": "Task not found"})
+    return row_to_dict(row)
 
+
+# ---------------------------------------------------------------------------
+# Stage 2 — Insert into SQLite
+# ---------------------------------------------------------------------------
 
 @app.post("/tasks", status_code=201, summary="Create a new task", tags=["tasks"])
 def create_task(body: TaskCreate):
@@ -131,12 +194,17 @@ def create_task(body: TaskCreate):
     - The new task is assigned the next available ID with `done=false`.
     - Returns **201** with the created task.
     """
-    global next_id
-    new_task = {"id": next_id, "title": body.title, "done": False}
-    tasks.append(new_task)
-    next_id += 1
-    return new_task
+    with db() as conn:
+        cursor = conn.execute(
+            "INSERT INTO tasks (title, done) VALUES (?, ?)", (body.title, 0)
+        )
+        new_id = cursor.lastrowid
+    return {"id": new_id, "title": body.title, "done": False}
 
+
+# ---------------------------------------------------------------------------
+# Stage 3 — Update and Delete with SQL
+# ---------------------------------------------------------------------------
 
 @app.put("/tasks/{task_id}", summary="Update a task", tags=["tasks"])
 def update_task(task_id: int, body: TaskUpdate):
@@ -146,16 +214,25 @@ def update_task(task_id: int, body: TaskUpdate):
     - **400** if the body is empty or title is blank.
     - **404** if the task does not exist.
     """
-    task = find_task(task_id)
-    if task is None:
-        return JSONResponse(status_code=404, content={"error": f"Task {task_id} not found"})
-    if body.title is None and body.done is None:
-        return JSONResponse(status_code=400, content={"error": "Request body must include at least one field: title or done"})
-    if body.title is not None:
-        task["title"] = body.title
-    if body.done is not None:
-        task["done"] = body.done
-    return task
+    # Verify task exists first
+    with db() as conn:
+        row = conn.execute(
+            "SELECT id, title, done FROM tasks WHERE id = ?", (task_id,)
+        ).fetchone()
+        if row is None:
+            return JSONResponse(status_code=404, content={"error": "Task not found"})
+        if body.title is None and body.done is None:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Request body must include at least one field: title or done"},
+            )
+        new_title = body.title if body.title is not None else row["title"]
+        new_done = int(body.done) if body.done is not None else row["done"]
+        conn.execute(
+            "UPDATE tasks SET title = ?, done = ? WHERE id = ?",
+            (new_title, new_done, task_id),
+        )
+    return {"id": task_id, "title": new_title, "done": bool(new_done)}
 
 
 @app.delete("/tasks/{task_id}", status_code=204, summary="Delete a task", tags=["tasks"])
@@ -165,8 +242,11 @@ def delete_task(task_id: int):
     - Returns **204** with an empty body on success.
     - **404** if the task does not exist.
     """
-    task = find_task(task_id)
-    if task is None:
-        return JSONResponse(status_code=404, content={"error": f"Task {task_id} not found"})
-    tasks.remove(task)
+    with db() as conn:
+        row = conn.execute(
+            "SELECT id FROM tasks WHERE id = ?", (task_id,)
+        ).fetchone()
+        if row is None:
+            return JSONResponse(status_code=404, content={"error": "Task not found"})
+        conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
     return None
