@@ -156,7 +156,7 @@ def health():
 
 
 # ---------------------------------------------------------------------------
-# Stage 1 — Read from SQLite
+# Stage 1 — Read from SQLite  (GET /tasks, GET /tasks/{id})
 # ---------------------------------------------------------------------------
 
 @app.get("/tasks", summary="List all tasks", tags=["tasks"])
