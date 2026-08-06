@@ -1,6 +1,11 @@
 # SQLite database (auto-created at runtime)
 tasks.db
 
+# PostgreSQL environment files
+.env
+.env.*
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
