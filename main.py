@@ -1,24 +1,34 @@
-import sqlite3
+import os
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from contextlib import contextmanager
 from pathlib import Path
+from dotenv import load_dotenv
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, field_validator
 
-# ---------------------------------------------------------------------------
-# Database setup
-# ---------------------------------------------------------------------------
+# Load environment variables
+load_dotenv()
 
-DB_PATH = Path(__file__).parent / "tasks.db"
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME", "tasks")
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "dev")
 
 
-def get_connection() -> sqlite3.Connection:
-    """Open a connection with row_factory so rows behave like dicts."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+def get_connection():
+    """Open a connection to the PostgreSQL database."""
+    return psycopg2.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        database=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD
+    )
 
 
 @contextmanager
@@ -38,30 +48,29 @@ def db():
 def init_db() -> None:
     """Create table and seed exactly three rows if the table is empty."""
     with db() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS tasks (
-                id    INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT    NOT NULL,
-                done  INTEGER NOT NULL DEFAULT 0
-            )
-            """
-        )
-        row = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()
-        if row[0] == 0:
-            conn.executemany(
-                "INSERT INTO tasks (title, done) VALUES (?, ?)",
-                [
-                    ("Buy groceries", 0),
-                    ("Read FastAPI docs", 1),
-                    ("Write unit tests", 0),
-                ],
-            )
+        with conn.cursor() as cur:
+            schema_path = Path(__file__).parent / "schema.sql"
+            if schema_path.exists():
+                with open(schema_path, "r") as f:
+                    cur.execute(f.read())
+            
+            cur.execute("SELECT COUNT(*) FROM tasks")
+            count = cur.fetchone()[0]
+            if count == 0:
+                cur.executemany(
+                    "INSERT INTO tasks (title, done) VALUES (%s, %s)",
+                    [
+                        ("Buy groceries", False),
+                        ("Read FastAPI docs", True),
+                        ("Write unit tests", False),
+                    ],
+                )
 
 
-def row_to_dict(row: sqlite3.Row) -> dict:
-    """Convert a sqlite3.Row to a plain dict with done as bool."""
+def row_to_dict(row: dict) -> dict:
+    """Convert a row dict to a plain dict with done as bool."""
     return {"id": row["id"], "title": row["title"], "done": bool(row["done"])}
+
 
 
 # ---------------------------------------------------------------------------

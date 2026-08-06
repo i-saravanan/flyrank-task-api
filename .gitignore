@@ -4,6 +4,8 @@ tasks.db
 # PostgreSQL environment files
 .env
 .env.*
+!.env.example
+
 
 
 # Byte-compiled / optimized / DLL files
