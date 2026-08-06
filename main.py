@@ -183,7 +183,7 @@ def get_task(task_id: int):
 
 
 # ---------------------------------------------------------------------------
-# Stage 2 — Insert into SQLite
+# Stage 2 — Insert into SQLite  (POST /tasks)
 # ---------------------------------------------------------------------------
 
 @app.post("/tasks", status_code=201, summary="Create a new task", tags=["tasks"])
